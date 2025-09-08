@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import ToolMessage
 import time
 import json
 from datetime import datetime
@@ -91,12 +92,24 @@ def create_news_analyst(llm, toolkit):
         
         # 🔧 使用统一新闻工具，简化工具调用
         logger.info(f"[新闻分析师] 使用统一新闻工具，自动识别股票类型并获取相应新闻")
-   # 创建统一新闻工具
-        unified_news_tool = create_unified_news_tool(toolkit)
-        unified_news_tool.name = "get_stock_news_unified"
         
-        tools = [unified_news_tool]
+        # 创建统一新闻函数
+        unified_news_function = create_unified_news_tool(toolkit)
+        
+        # 将统一新闻函数包装成LangChain工具
+        from langchain_core.tools import tool
+        
+        @tool
+        def get_stock_news_unified_tool(stock_code: str, max_news: int = 100, model_info: str = ""):
+            """统一新闻获取工具 - 根据股票代码自动获取相应市场的新闻"""
+            return unified_news_function(stock_code, max_news, model_info)
+        
+        get_stock_news_unified_tool.name = "get_stock_news_unified"
+        tools = [get_stock_news_unified_tool]
         logger.info(f"[新闻分析师] 已加载统一新闻工具: get_stock_news_unified")
+        
+        # 添加调试日志：检查工具类型
+        logger.info(f"[新闻分析师] 工具类型: {type(tools[0])}")
 
         system_message = (
             """您是一位专业的财经新闻分析师，负责分析最新的市场新闻和事件对股票价格的潜在影响。
@@ -199,7 +212,7 @@ def create_news_analyst(llm, toolkit):
             try:
                 # 强制预先获取新闻数据
                 logger.info(f"[新闻分析师] 🔧 预处理：强制调用统一新闻工具...")
-                pre_fetched_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
+                pre_fetched_news = unified_news_function(ticker, 10, model_info)
                 
                 if pre_fetched_news and len(pre_fetched_news.strip()) > 100:
                     logger.info(f"[新闻分析师] ✅ 预处理成功获取新闻: {len(pre_fetched_news)} 字符")
@@ -291,7 +304,11 @@ def create_news_analyst(llm, toolkit):
                 try:
                     # 强制获取新闻数据
                     logger.info(f"[新闻分析师] 🔧 强制调用统一新闻工具获取新闻数据...")
-                    forced_news = unified_news_tool(stock_code=ticker, max_news=10, model_info="")
+                    forced_news = unified_news_function(ticker, 10, "")
+                    
+                    # 添加详细的调试日志
+                    logger.info(f"[新闻分析师] 📊 强制获取新闻结果长度: {len(forced_news) if forced_news else 0} 字符")
+                    logger.info(f"[新闻分析师] 📋 强制获取新闻内容预览: {forced_news[:200] if forced_news else 'None'}")
                     
                     if forced_news and len(forced_news.strip()) > 100:
                         logger.info(f"[新闻分析师] ✅ 强制获取新闻成功: {len(forced_news)} 字符")
@@ -326,8 +343,72 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] ❌ 强制补救过程失败: {e}")
                     report = result.content
             else:
-                # 有工具调用，直接使用结果
-                report = result.content
+                # 有工具调用，执行工具并继续对话
+                logger.info(f"[新闻分析师] 🔧 开始执行 {tool_call_count} 个工具调用...")
+                
+                # 存储工具执行结果
+                tool_messages = []
+                
+                for tool_call in result.tool_calls:
+                    tool_name = tool_call['name']
+                    tool_args = tool_call['args']
+                    
+                    logger.info(f"[新闻分析师] 🔧 执行工具: {tool_name} with args: {tool_args}")
+                    
+                    # 查找对应的工具
+                    tool_to_call = None
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            tool_to_call = tool
+                            break
+                    
+                    if tool_to_call:
+                        try:
+                            # 执行工具
+                            tool_result = tool_to_call.invoke(tool_args)
+                            logger.info(f"[新闻分析师] ✅ 工具 {tool_name} 执行成功，结果长度: {len(tool_result)}")
+                            
+                            # 创建ToolMessage
+                            tool_message = ToolMessage(
+                                content=tool_result,
+                                tool_call_id=tool_call['id'],
+                                name=tool_name
+                            )
+                            tool_messages.append(tool_message)
+                            
+                        except Exception as e:
+                            error_msg = f"工具 {tool_name} 执行失败: {str(e)}"
+                            logger.error(f"[新闻分析师] ❌ {error_msg}")
+                            tool_message = ToolMessage(
+                                content=error_msg,
+                                tool_call_id=tool_call['id'],
+                                name=tool_name
+                            )
+                            tool_messages.append(tool_message)
+                    else:
+                        error_msg = f"未找到工具: {tool_name}"
+                        logger.error(f"[新闻分析师] ❌ {error_msg}")
+                        tool_message = ToolMessage(
+                            content=error_msg,
+                            tool_call_id=tool_call['id'],
+                            name=tool_name
+                        )
+                        tool_messages.append(tool_message)
+                
+                # 将工具执行结果添加到消息历史中
+                state["messages"].append(result)
+                state["messages"].extend(tool_messages)
+                
+                # 再次调用LLM继续分析
+                logger.info(f"[新闻分析师] 🔄 基于工具执行结果继续分析...")
+                follow_up_result = chain.invoke(state["messages"])
+                
+                if hasattr(follow_up_result, 'content') and follow_up_result.content:
+                    report = follow_up_result.content
+                    logger.info(f"[新闻分析师] ✅ 工具执行后分析完成，报告长度: {len(report)} 字符")
+                else:
+                    logger.warning(f"[新闻分析师] ⚠️ 工具执行后分析失败，使用原始结果")
+                    report = result.content
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")
