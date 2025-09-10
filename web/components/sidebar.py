@@ -930,23 +930,23 @@ def render_sidebar():
                 return "未配置", "error"
 
             if expected_format == "dashscope" and key.startswith("sk-") and len(key) >= 32:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "deepseek" and key.startswith("sk-") and len(key) >= 32:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "finnhub" and len(key) >= 20:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "tushare" and len(key) >= 32:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "google" and key.startswith("AIza") and len(key) >= 32:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "openai" and key.startswith("sk-") and len(key) >= 40:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "anthropic" and key.startswith("sk-") and len(key) >= 40:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             elif expected_format == "reddit" and len(key) >= 10:
-                return f"{key[:8]}...", "success"
+                return f"{key[:3]}xxx...", "success"
             else:
-                return f"{key[:8]}... (格式异常)", "warning"
+                return f"{key[:3]}... (格式异常)", "warning"
 
         # 必需的API密钥
         st.markdown("*必需配置:*")

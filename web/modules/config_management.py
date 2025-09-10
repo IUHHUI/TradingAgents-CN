@@ -86,88 +86,8 @@ def render_model_config():
         
         df = pd.DataFrame(model_data)
         st.dataframe(df, use_container_width=True)
-        
-        # 编辑模型配置
-        st.markdown("**编辑模型配置**")
-        
-        # 选择要编辑的模型
-        model_options = [f"{m.provider} - {m.model_name}" for m in models]
-        selected_model_idx = st.selectbox("选择要编辑的模型", range(len(model_options)),
-                                         format_func=lambda x: model_options[x],
-                                         key="select_model_to_edit")
-        
-        if selected_model_idx is not None:
-            model = models[selected_model_idx]
-
-            # 检查是否来自.env
-            env_has_key = env_status["api_keys"].get(model.provider.lower(), False)
-            if env_has_key:
-                st.info(f"💡 此模型的API密钥来自 .env 文件，修改 .env 文件后需重启应用生效")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                new_api_key = st.text_input("API密钥", value=model.api_key, type="password", key=f"edit_api_key_{selected_model_idx}")
-                if env_has_key:
-                    st.caption("⚠️ 此密钥来自 .env 文件，Web修改可能被覆盖")
-                new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_idx}")
-                new_temperature = st.slider("温度参数", 0.0, 2.0, model.temperature, 0.1, key=f"edit_temperature_{selected_model_idx}")
-
-            with col2:
-                new_enabled = st.checkbox("启用模型", value=model.enabled, key=f"edit_enabled_{selected_model_idx}")
-                new_base_url = st.text_input("自定义API地址 (可选)", value=model.base_url or "", key=f"edit_base_url_{selected_model_idx}")
-            
-            if st.button("保存配置", type="primary", key=f"save_model_config_{selected_model_idx}"):
-                # 更新模型配置
-                models[selected_model_idx] = ModelConfig(
-                    provider=model.provider,
-                    model_name=model.model_name,
-                    api_key=new_api_key,
-                    base_url=new_base_url if new_base_url else None,
-                    max_tokens=new_max_tokens,
-                    temperature=new_temperature,
-                    enabled=new_enabled
-                )
-                
-                config_manager.save_models(models)
-                st.success("✅ 配置已保存！")
-                st.rerun()
-    
     else:
         st.warning("没有找到模型配置")
-    
-    # 添加新模型
-    st.markdown("**添加新模型**")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        new_provider = st.selectbox("供应商", ["dashscope", "openai", "google", "anthropic", "other"], key="new_provider")
-        new_model_name = st.text_input("模型名称", placeholder="例如: gpt-4, qwen-plus-latest", key="new_model_name")
-        new_api_key = st.text_input("API密钥", type="password", key="new_api_key")
-
-    with col2:
-        new_max_tokens = st.number_input("最大Token数", value=4000, min_value=1000, max_value=32000, key="new_max_tokens")
-        new_temperature = st.slider("温度参数", 0.0, 2.0, 0.7, 0.1, key="new_temperature")
-        new_enabled = st.checkbox("启用模型", value=True, key="new_enabled")
-    
-    if st.button("添加模型", key="add_new_model"):
-        if new_provider and new_model_name and new_api_key:
-            new_model = ModelConfig(
-                provider=new_provider,
-                model_name=new_model_name,
-                api_key=new_api_key,
-                max_tokens=new_max_tokens,
-                temperature=new_temperature,
-                enabled=new_enabled
-            )
-            
-            models.append(new_model)
-            config_manager.save_models(models)
-            st.success("✅ 新模型已添加！")
-            st.rerun()
-        else:
-            st.error("请填写所有必需字段")
 
 
 def render_pricing_config():
