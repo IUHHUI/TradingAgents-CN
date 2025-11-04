@@ -13,6 +13,7 @@ from tradingagents.dataflows.fiu.fiu_source import (
     FiuPriceDataSource,
     FiuFundamentalDataSource,
 )
+from tradingagents.dataflows.fiu.fiu_search_symbol import search_one, get_market_text
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -84,20 +85,36 @@ class AKShareProvider:
                 symbol = symbol
             else:
                 symbol = symbol.replace('.SZ', '').replace('.SS', '')
-
+            stock_info = search_one(symbol)
+            symbol_fiu = stock_info.get('marketSymbol')
             # 获取数据
-            data = self.ak.stock_zh_a_hist(
-                symbol=symbol,
-                period="daily",
-                start_date=start_date.replace('-', '') if start_date else "20240101",
-                end_date=end_date.replace('-', '') if end_date else "20241231",
-                adjust=""
-            )
+            data = self.price_source.get_stock_data(symbol_fiu, "a_stock", "1m")
 
+            if not data.empty:
+                # 数据预处理
+                data = data.reset_index()
+                data['Symbol'] = symbol  # 保持原始格式
+
+                # 重命名列以保持一致性
+                column_mapping = {
+                    'date': 'Date',
+                    'open': 'Open',
+                    'close': 'Close',
+                    'high': 'High',
+                    'low': 'Low',
+                    'volume': 'Volume',
+                    'amount': 'Amount'
+                }
+
+                for old_col, new_col in column_mapping.items():
+                    if old_col in data.columns:
+                        data = data.rename(columns={old_col: new_col})
+
+            logger.info(f"✅ SZFIU A股数据获取成功: {symbol}, {len(data)}条记录")
             return data
 
         except Exception as e:
-            logger.error(f"❌ AKShare获取股票数据失败: {e}")
+            logger.error(f"❌ SZFIU 获取股票数据失败: {e}")
             return None
 
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
@@ -107,21 +124,20 @@ class AKShareProvider:
 
         try:
             # 获取股票基本信息
-            stock_list = self.ak.stock_info_a_code_name()
-            stock_info = stock_list[stock_list['code'] == symbol]
+            stock_info = search_one(symbol)
 
-            if not stock_info.empty:
+            if stock_info:
                 return {
-                    'symbol': symbol,
-                    'name': stock_info.iloc[0]['name'],
-                    'source': 'akshare'
+                    'symbol': stock_info.get('marketSymbol'),
+                    'name': stock_info.get('chineseName'),
+                    'source': "szfiu",
                 }
             else:
-                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'szfiu'}
 
         except Exception as e:
-            logger.error(f"❌ AKShare获取股票信息失败: {e}")
-            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
+            logger.error(f"❌ SZFIU 获取股票信息失败: {e}")
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'szfiu'}
 
     def get_hk_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
         """
@@ -137,15 +153,15 @@ class AKShareProvider:
         """
         try:
             # 标准化港股代码 - AKShare使用5位数字格式
-            hk_symbol = self._normalize_hk_symbol_for_akshare(symbol)
-            hk_symbol_fiu = hk_symbol + ".hk"
-
+            stock_info = search_one(symbol)
+            hk_symbol = stock_info.get('symbol')
+            hk_symbol_fiu = stock_info.get('marketSymbol')
             logger.info(f"🇭🇰 fiu获取港股数据: {hk_symbol}")
             # 格式化日期为AKShare需要的格式
             start_date_formatted = start_date.replace('-', '') if start_date else "20251101"
             end_date_formatted = end_date.replace('-', '') if end_date else "20251104"
 
-            # 获取港股历史数据（带超时保护）
+            # 获取港股历史数据
             data = self.price_source.get_stock_data(hk_symbol_fiu, "hk_stock", "1m")
 
             if not data.empty:
@@ -168,14 +184,14 @@ class AKShareProvider:
                     if old_col in data.columns:
                         data = data.rename(columns={old_col: new_col})
 
-                logger.info(f"✅ AKShare港股数据获取成功: {symbol}, {len(data)}条记录")
+                logger.info(f"✅ SZFIU 港股数据获取成功: {symbol}, {len(data)}条记录")
                 return data
             else:
-                logger.warning(f"⚠️ AKShare港股数据为空: {symbol}")
+                logger.warning(f"⚠️ SZFIU 港股数据为空: {symbol}")
                 return None
 
         except Exception as e:
-            logger.error(f"❌ AKShare获取港股数据失败: {e}")
+            logger.error(f"❌ SZFIU 获取港股数据失败: {e}")
             return None
 
     def get_hk_stock_info(self, symbol: str) -> Dict[str, Any]:
@@ -198,22 +214,24 @@ class AKShareProvider:
             }
 
         try:
-            hk_symbol = self._normalize_hk_symbol_for_akshare(symbol)
-            hk_symbol_fiu = hk_symbol + ".hk"
+            stock_info = search_one(symbol)
+            hk_symbol = stock_info.get('symbol')
+            hk_symbol_fiu = stock_info.get('marketSymbol')
+            hk_stock_name = stock_info.get('chineseName')
 
-            logger.info(f"🇭🇰 FIU获取港股信息: {hk_symbol}")
+            logger.info(f"🇭🇰 SZFIU获取港股信息: {hk_symbol}")
 
             data = self.price_source.get_realtime_price(hk_symbol_fiu, "hk_stock", include_extended=False)
             return {
                 "symbol": symbol,
-                "name": data.get("名称", f"港股{symbol}"),
+                "name": hk_stock_name,
                 "currency": "HKD",
                 "exchange": "HKG",
                 "latest_price": data.get("current_price", None),
-                'source': '深圳融聚汇',
+                'source': 'SZFIU',
             }
         except Exception as e:
-            logger.error(f"❌ FIU获取港股信息失败: {e}")
+            logger.error(f"❌ SZFIU获取港股信息失败: {e}")
             return {
                 'symbol': symbol,
                 'name': f'港股{symbol}',
@@ -452,7 +470,7 @@ def format_hk_stock_data_akshare(symbol: str, data: pd.DataFrame, start_date: st
             volume = row.get('Volume', 0)
             formatted_text += f"- {date}: 开盘HK${row['Open']:.2f}, 收盘HK${row['Close']:.2f}, 成交量{volume:,.0f}\n"
 
-        formatted_text += f"\n数据来源: AKShare (港股)\n"
+        formatted_text += f"\n数据来源: SZFIU (港股)\n"
 
         return formatted_text
 
