@@ -4,7 +4,6 @@
 """
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import AIMessage
 
 # 导入分析模块日志装饰器
 from tradingagents.utils.tool_logging import log_analyst_module
@@ -94,6 +93,75 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.debug(f"📊 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
         logger.debug(f"📊 [DEBUG] 现有基本面报告: {state.get('fundamentals_report', 'None')}")
 
+        # 🔧 防止工具调用循环：检查是否已有工具执行结果
+        from langchain_core.messages import ToolMessage
+        messages = state.get("messages", [])
+        if len(messages) > 0:
+            # 检查最近的消息中是否有ToolMessage
+            has_tool_result = False
+            tool_result_content = None
+            for msg in reversed(messages[-10:]):  # 检查最近10条消息
+                if isinstance(msg, ToolMessage):
+                    has_tool_result = True
+                    tool_result_content = msg.content
+                    logger.info(f"📊 [基本面分析师] 检测到工具执行结果，将生成最终报告")
+                    break
+                # 如果遇到AIMessage但没有tool_calls，说明这是一个分析结果，停止检查
+                if hasattr(msg, 'tool_calls') and not msg.tool_calls and hasattr(msg, 'content') and len(msg.content) > 100:
+                    break
+
+            # 如果检测到工具结果，直接生成报告而不再调用工具
+            if has_tool_result and tool_result_content:
+                logger.info(f"📊 [基本面分析师] 基于工具结果生成最终报告，跳过工具调用")
+
+                # 获取市场信息
+                from tradingagents.utils.stock_utils import StockUtils
+                market_info = StockUtils.get_market_info(ticker)
+                company_name = _get_company_name_for_fundamentals(ticker, market_info)
+                currency_info = f"{market_info['currency_name']}（{market_info['currency_symbol']}）"
+
+                # 创建分析prompt
+                analysis_prompt = f"""基于以下真实数据，对{company_name}（股票代码：{ticker}）进行详细的基本面分析：
+
+{tool_result_content}
+
+请提供：
+1. 公司基本信息分析（{company_name}，股票代码：{ticker}）
+2. 财务状况评估
+3. 盈利能力分析
+4. 估值分析（使用{currency_info}）
+5. 投资建议（买入/持有/卖出）
+
+要求：
+- 基于提供的真实数据进行分析
+- 正确使用公司名称"{company_name}"和股票代码"{ticker}"
+- 价格使用{currency_info}
+- 投资建议使用中文
+- 分析要详细且专业"""
+
+                try:
+                    # 创建简单的分析链
+                    analysis_prompt_template = ChatPromptTemplate.from_messages([
+                        ("system", "你是专业的股票基本面分析师，基于提供的真实数据进行分析。"),
+                        ("human", "{analysis_request}")
+                    ])
+
+                    analysis_chain = analysis_prompt_template | llm
+                    analysis_result = analysis_chain.invoke({"analysis_request": analysis_prompt})
+
+                    if hasattr(analysis_result, 'content'):
+                        report = analysis_result.content
+                    else:
+                        report = str(analysis_result)
+
+                    logger.info(f"📊 [基本面分析师] 最终报告生成完成，报告长度: {len(report)}")
+                    return {"fundamentals_report": report}
+
+                except Exception as e:
+                    logger.error(f"❌ [基本面分析师] 生成最终报告失败: {e}")
+                    # 如果生成失败，继续正常流程
+                    pass
+
         # 获取股票市场信息
         from tradingagents.utils.stock_utils import StockUtils
         logger.info(f"📊 [基本面分析师] 正在分析股票: {ticker}")
@@ -132,7 +200,7 @@ def create_fundamentals_analyst(llm, toolkit):
             logger.debug(f"📊 [DEBUG] 🔧 统一工具将自动处理: {market_info['market_name']}")
         else:
             # 离线模式：优先使用FinnHub数据，SimFin作为补充
-            if is_china:
+            if market_info['is_china']:
                 # A股使用本地缓存数据
                 tools = [
                     toolkit.get_china_stock_data,
@@ -384,11 +452,7 @@ def create_fundamentals_analyst(llm, toolkit):
                 except Exception as e:
                     logger.error(f"❌ [DEBUG] 强制工具调用分析失败: {e}")
                     report = f"基本面分析失败：{str(e)}"
-                
-                return {"fundamentals_report": report}
 
-        # 这里不应该到达，但作为备用
-        logger.debug(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(result.content) if hasattr(result, 'content') else 0}")
-        return {"messages": [result]}
+                return {"fundamentals_report": report}
 
     return fundamentals_analyst_node
