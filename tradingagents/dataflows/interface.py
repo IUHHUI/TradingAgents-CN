@@ -1301,27 +1301,31 @@ def get_china_stock_info_unified(
         str: 股票基本信息
     """
     try:
-        from .data_source_manager import get_china_stock_info_unified
+        logger.info(f"📊 [SZFIU接口] 获取{ticker}基本信息...")
+        from tradingagents.dataflows.fiu.fiu_search_symbol import search_one, get_market_text 
+        fiu_stock = search_one(ticker)
+        fiu_stock_symbol = fiu_stock.get('marketSymbol')
+        fiu_stock_name = fiu_stock.get('chineseName') or fiu_stock.get('englishName')
 
-        logger.info(f"📊 [统一接口] 获取{ticker}基本信息...")
+        from tradingagents.dataflows.fiu.fiu_source import FiuFundamentalDataSource
+        info = FiuFundamentalDataSource().get_stock_info(fiu_stock_symbol, get_market_text(fiu_stock))
 
-        info = get_china_stock_info_unified(ticker)
-
-        if info and info.get('name'):
-            result = f"股票代码: {ticker}\n"
-            result += f"股票名称: {info.get('name', '未知')}\n"
-            result += f"所属地区: {info.get('area', '未知')}\n"
-            result += f"所属行业: {info.get('industry', '未知')}\n"
-            result += f"上市市场: {info.get('market', '未知')}\n"
-            result += f"上市日期: {info.get('list_date', '未知')}\n"
-            result += f"数据来源: {info.get('source', 'unknown')}\n"
+        if info and 'company_info' in info:
+            ci=info['company_info']
+            result = f"股票代码: {fiu_stock_symbol}\n"
+            result += f"股票名称: {fiu_stock_name}\n"
+            result += f"所属地区: {ci.get('company_address') or ci.get('province') or'未知'}\n"
+            result += f"所属行业: {ci.get('industry', '未知')}\n"
+            result += f"上市市场: {ci.get('market', '未知')}\n"
+            result += f"上市日期: {ci.get('list_date', '未知')}\n"
+            result += f"数据来源: SZFIU\n"  
 
             return result
         else:
             return f"❌ 未能获取{ticker}的基本信息"
 
     except Exception as e:
-        logger.error(f"❌ [统一接口] 获取股票信息失败: {e}")
+        logger.error(f"❌ [SZFIU] 获取股票信息失败: {e}")
         return f"❌ 获取{ticker}股票信息失败: {e}"
 
 
