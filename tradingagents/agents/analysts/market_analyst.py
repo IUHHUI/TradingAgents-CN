@@ -477,7 +477,7 @@ def create_market_analyst(llm, toolkit):
 4. 报告长度不少于800字
 5. 使用中文撰写
 
-请分析股票{ticker}的技术面情况，包括：
+请分析 上市公司{company_name}(股票代码:{ticker}) 的技术面情况，包括：
 - 价格趋势分析
 - 技术指标解读
 - 支撑阻力位分析
